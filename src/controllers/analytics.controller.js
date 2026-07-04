@@ -34,8 +34,8 @@ exports.getAdminDashboardMetrics = async (req, res) => {
         totalMembers = bucket.totalCount;
         activeMembers = bucket.activeCount;
         pendingMembers = bucket.pendingCount;
-      } else if (bucket._id === 'ASSOCIATE') {
-        totalAssociates = bucket.activeCount;
+      } else if (bucket._id === 'ASSOCIATE' || bucket._id === 'BLOCK_COORDINATOR') {
+        totalAssociates += bucket.activeCount;
       } else if (bucket._id === 'ADMIN') {
         totalAdmins = bucket.activeCount;
       }

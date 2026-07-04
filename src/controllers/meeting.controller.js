@@ -11,7 +11,7 @@ const { cloudinary } = require('../middleware/upload.middleware');
  * SUPER_ADMIN → all meetings
  */
 const buildScopeFilter = (user) => {
-  if (user.role === 'ASSOCIATE') {
+  if (user.role === 'ASSOCIATE' || user.role === 'BLOCK_COORDINATOR') {
     return { conductedBy: user._id };
   }
   if (user.role === 'ADMIN') {
@@ -176,7 +176,7 @@ exports.getMeetingById = async (req, res) => {
       return res.status(404).json({ success: false, message: 'Meeting not found.' });
     }
 
-    if (req.user.role === 'ASSOCIATE') {
+    if (req.user.role === 'ASSOCIATE' || req.user.role === 'BLOCK_COORDINATOR') {
       if (meeting.conductedBy._id.toString() !== req.user._id.toString()) {
         return res.status(403).json({ success: false, message: 'Access denied.' });
       }
@@ -454,6 +454,62 @@ exports.getMeetingStats = async (req, res) => {
     return res.status(200).json({
       success: true,
       data: { total, totalAttended, monthly: monthlyAgg, byType: typeAgg, districtStats, associateStats, recent },
+    });
+  } catch (error) {
+    return res.status(500).json({ success: false, error: error.message });
+  }
+};
+
+// ─── BC: GET ASSOCIATE MEETINGS ───────────────────────────────────────────────
+
+// @desc    Block Coordinator — get all meetings conducted by a specific associate in their block
+// @route   GET /api/v1/meetings/bc/associate/:associateId
+// @access  BLOCK_COORDINATOR
+exports.getAssociateMeetingsForBC = async (req, res) => {
+  try {
+    const { associateId } = req.params;
+    const bc = req.user;
+    const User = require('../models/User');
+
+    // Collect BC's block IDs (raw ObjectIds from middleware — not populated)
+    const blockIdSet = new Set();
+    if (bc.blockId) blockIdSet.add(String(bc.blockId));
+    (bc.assignedBlocks || []).forEach(b => blockIdSet.add(String(b)));
+
+    if (blockIdSet.size === 0) {
+      return res.status(403).json({ success: false, message: 'No block assigned to your account.' });
+    }
+
+    // Verify the associate belongs to one of the BC's blocks
+    const assoc = await User.findOne({
+      _id: associateId,
+      role: 'ASSOCIATE',
+      blockId: { $in: Array.from(blockIdSet) },
+    });
+
+    if (!assoc) {
+      return res.status(403).json({ success: false, message: 'This associate is not in your block.' });
+    }
+
+    const { page = 1, limit = 200 } = req.query;
+    const skip = (parseInt(page) - 1) * parseInt(limit);
+
+    const [meetings, total] = await Promise.all([
+      Meeting.find({ conductedBy: assoc._id })
+        .populate('conductedBy', 'name employeeId role')
+        .populate('districtId', 'name')
+        .populate('blockId', 'name')
+        .sort({ meetingDate: -1 })
+        .skip(skip)
+        .limit(parseInt(limit)),
+      Meeting.countDocuments({ conductedBy: assoc._id }),
+    ]);
+
+    return res.status(200).json({
+      success: true,
+      count: meetings.length,
+      total,
+      data: meetings,
     });
   } catch (error) {
     return res.status(500).json({ success: false, error: error.message });

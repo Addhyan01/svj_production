@@ -14,42 +14,68 @@ const generateMembershipId = async () => {
 
 // Member ID — assigned at registration, format: MBR-00001
 const generateMemberId = async () => {
-  const count = await User.countDocuments({ role: 'MEMBER', memberId: { $exists: true, $ne: null } });
-  return `MBR-${String(count + 1).padStart(5, '0')}`;
+  let attempts = 0;
+  while (attempts < 10) {
+    const count = await User.countDocuments({ role: 'MEMBER', memberId: { $exists: true, $ne: null } });
+    const candidate = `MBR-${String(count + 1 + attempts).padStart(5, '0')}`;
+    const exists = await User.findOne({ memberId: candidate });
+    if (!exists) return candidate;
+    attempts++;
+  }
+  // Fallback: use timestamp to guarantee uniqueness
+  return `MBR-${Date.now()}`;
 };
 
 // Donor ID — assigned at registration, format: DNR-00001
 const generateDonorId = async () => {
-  const count = await User.countDocuments({ role: 'DONOR', donorId: { $exists: true, $ne: null } });
-  return `DNR-${String(count + 1).padStart(5, '0')}`;
+  let attempts = 0;
+  while (attempts < 10) {
+    const count = await User.countDocuments({ role: 'DONOR', donorId: { $exists: true, $ne: null } });
+    const candidate = `DNR-${String(count + 1 + attempts).padStart(5, '0')}`;
+    const exists = await User.findOne({ donorId: candidate });
+    if (!exists) return candidate;
+    attempts++;
+  }
+  return `DNR-${Date.now()}`;
 };
 
-// Employee ID generator for staff roles (ASSOCIATE, ADMIN, SUPER_ADMIN)
+// Employee ID generator for staff roles (ASSOCIATE, BLOCK_COORDINATOR, ADMIN, SUPER_ADMIN)
 const EMPLOYEE_ROLE_PREFIX = {
-  ASSOCIATE:   'ASSOC',
-  ADMIN:       'ADMIN',
-  SUPER_ADMIN: 'SADM',
+  ASSOCIATE:         'ASSOC',
+  BLOCK_COORDINATOR: 'BKCO',
+  ADMIN:             'ADMIN',
+  SUPER_ADMIN:       'SADM',
 };
 
 const generateEmployeeId = async (role) => {
   const prefix = EMPLOYEE_ROLE_PREFIX[role];
   if (!prefix) return null;
-  const count = await User.countDocuments({ role, employeeId: { $exists: true, $ne: null } });
-  const serial = String(count + 1).padStart(4, '0');
-  return `EP-${prefix}-${serial}`;
+  let attempts = 0;
+  while (attempts < 10) {
+    const count = await User.countDocuments({ role, employeeId: { $exists: true, $ne: null } });
+    const serial = String(count + 1 + attempts).padStart(4, '0');
+    const candidate = `EP-${prefix}-${serial}`;
+    const exists = await User.findOne({ employeeId: candidate });
+    if (!exists) return candidate;
+    attempts++;
+  }
+  return `EP-${prefix}-${Date.now()}`;
 };
 
 // @desc    Self-Registration / Internal Hierarchy account provisioning
 // @route   POST /api/v1/auth/register
 exports.register = async (req, res) => {
   try {
-    const { name, email, password, phone, role, districtId, blockId, associateId } = req.body;
+    const { name, email, password, phone, role, districtId, blockId, associateId, fatherName, address, pinCode } = req.body;
     
     // Authorization Check for Creation Hierarchies
     if (req.user) {
       const actorRole = req.user.role;
-      if (actorRole === 'ASSOCIATE' && (role === 'ADMIN' || role === 'ASSOCIATE')) {
-        return res.status(403).json({ success: false, message: 'Associates can only spawn Members/Donors.' });
+      if (
+        (actorRole === 'ASSOCIATE' || actorRole === 'BLOCK_COORDINATOR') &&
+        (role === 'ADMIN' || role === 'ASSOCIATE' || role === 'BLOCK_COORDINATOR')
+      ) {
+        return res.status(403).json({ success: false, message: 'Associates and Block Coordinators can only register Members/Donors.' });
       }
       if (actorRole === 'ADMIN' && role === 'ADMIN') {
         return res.status(403).json({ success: false, message: 'District Admins cannot spawn other Admins.' });
@@ -60,19 +86,22 @@ exports.register = async (req, res) => {
       }
     }
 
-    // Resolve which associate this member belongs to:
-    // - If actor is ASSOCIATE → they are the associate (auto-assign)
+    // Resolve which associate/block-coordinator this member belongs to:
+    // - If actor is ASSOCIATE or BLOCK_COORDINATOR → they are auto-assigned
     // - If actor is ADMIN/SUPER_ADMIN and associateId is provided → use that
     // - Otherwise → null
     let resolvedAssociateId = null;
     if (req.user) {
-      if (req.user.role === 'ASSOCIATE' && (role === 'MEMBER' || role === 'DONOR')) {
+      if (
+        (req.user.role === 'ASSOCIATE' || req.user.role === 'BLOCK_COORDINATOR') &&
+        (role === 'MEMBER' || role === 'DONOR')
+      ) {
         resolvedAssociateId = req.user._id;
       } else if ((req.user.role === 'ADMIN' || req.user.role === 'SUPER_ADMIN') && associateId) {
-        // Validate the provided associateId is actually an ASSOCIATE
-        const assoc = await User.findOne({ _id: associateId, role: 'ASSOCIATE' });
+        // Validate the provided associateId is an ASSOCIATE or BLOCK_COORDINATOR
+        const assoc = await User.findOne({ _id: associateId, role: { $in: ['ASSOCIATE', 'BLOCK_COORDINATOR'] } });
         if (!assoc) {
-          return res.status(400).json({ success: false, message: 'Provided associateId does not belong to a valid Associate.' });
+          return res.status(400).json({ success: false, message: 'Provided associateId does not belong to a valid Associate or Block Coordinator.' });
         }
         resolvedAssociateId = assoc._id;
       }
@@ -83,11 +112,43 @@ exports.register = async (req, res) => {
     const memberId   = role === 'MEMBER' ? await generateMemberId() : null;
     const donorId    = role === 'DONOR'  ? await generateDonorId()  : null;
 
+    // ── ASSOCIATE / BLOCK_COORDINATOR: Block and District are mandatory ──────
+    if (role === 'ASSOCIATE' || role === 'BLOCK_COORDINATOR') {
+      if (!blockId) {
+        return res.status(400).json({ success: false, message: `Block is mandatory when creating a ${role === 'ASSOCIATE' ? 'Associate' : 'Block Coordinator'}.` });
+      }
+      if (!districtId) {
+        return res.status(400).json({ success: false, message: `District is mandatory when creating a ${role === 'ASSOCIATE' ? 'Associate' : 'Block Coordinator'}.` });
+      }
+    }
+
+    // ── MEMBER/DONOR created by ASSOCIATE or BLOCK_COORDINATOR:
+    //    auto-inherit blockId and districtId from the actor — ignore whatever frontend sends
+    let resolvedBlockId    = blockId    || null;
+    let resolvedDistrictId = districtId || null;
+
+    if (
+      req.user &&
+      (req.user.role === 'ASSOCIATE' || req.user.role === 'BLOCK_COORDINATOR') &&
+      (role === 'MEMBER' || role === 'DONOR')
+    ) {
+      resolvedBlockId    = req.user.blockId    || null;
+      resolvedDistrictId = req.user.districtId || null;
+    }
+
     const newUser = await User.create({
-      name, email, password, phone, role, districtId, blockId,
+      name, email, password, phone, role,
+      districtId: resolvedDistrictId,
+      blockId:    resolvedBlockId,
       createdBy: req.user ? req.user._id : null,
       associateId: resolvedAssociateId,
       status: (role === 'MEMBER' || role === 'DONOR') ? 'pending' : 'active',
+      // Additional personal details
+      ...(fatherName && { fatherName }),
+      ...(address    && { address }),
+      ...(pinCode    && { pinCode }),
+      // Associates and Block Coordinators are auto-assigned to their block's assignedBlocks array
+      ...(( role === 'ASSOCIATE' || role === 'BLOCK_COORDINATOR') && blockId ? { assignedBlocks: [blockId] } : {}),
       ...(employeeId && { employeeId }),
       ...(memberId   && { memberId }),
       ...(donorId    && { donorId }),
@@ -389,8 +450,8 @@ exports.adminResetPassword = async (req, res) => {
       return res.status(404).json({ success: false, message: 'Target user nahi mila.' });
     }
 
-    // 🛑 HARD LOCK 1: Agar request karne wala MEMBER ya ASSOCIATE hai, toh instantly BLOCK!
-    if (actorRole === 'MEMBER' || actorRole === 'ASSOCIATE') {
+    // 🛑 HARD LOCK 1: Agar request karne wala MEMBER, ASSOCIATE, ya BLOCK_COORDINATOR hai, toh instantly BLOCK!
+    if (actorRole === 'MEMBER' || actorRole === 'ASSOCIATE' || actorRole === 'BLOCK_COORDINATOR') {
       return res.status(403).json({ 
         success: false, 
         message: `Security Alert: Aapka role [${actorRole}] hai. Aap kisi ka password reset nahi kar sakte!` 
@@ -456,10 +517,49 @@ exports.getUsers = async (req, res) => {
       filter.districtId = adminDistrictId;
     }
 
-    // ── ASSOCIATE SCOPE LOCK ───────────────────────────────────────────────
-    // An ASSOCIATE can only see their own members (associateId = their _id).
+    // ── ASSOCIATE / BLOCK_COORDINATOR SCOPE LOCK ──────────────────────────────
     if (req.user.role === 'ASSOCIATE') {
+      // ASSOCIATE: can only see their own members
       filter.associateId = req.user._id;
+    } else if (req.user.role === 'BLOCK_COORDINATOR') {
+      // Helper: collect all block IDs this BC is responsible for
+      const getBcBlockIds = () => [
+        ...(req.user.assignedBlocks || []),
+        ...(req.user.blockId ? [req.user.blockId] : []),
+      ];
+
+      if (role === 'ASSOCIATE') {
+        // BC querying associates → scope to their block(s)
+        filter.blockId = { $in: getBcBlockIds() };
+      } else if (role === 'MEMBER' || role === 'DONOR') {
+        if (associateId) {
+          // If the associateId IS the BC themselves, allow it directly
+          if (String(associateId) === String(req.user._id)) {
+            filter.associateId = req.user._id;
+          } else {
+            // Verify the requested associate belongs to BC's block(s)
+            const assoc = await User.findOne({
+              _id: associateId,
+              role: 'ASSOCIATE',
+              blockId: { $in: getBcBlockIds() },
+            });
+            if (!assoc) {
+              return res.status(200).json({ success: true, count: 0, data: [] });
+            }
+            filter.associateId = assoc._id;
+          }
+        } else {
+          // No specific associate — return members directly under the BC
+          // plus members under any associate in BC's blocks
+          const blockAssociates = await User.find({
+            role: 'ASSOCIATE',
+            blockId: { $in: getBcBlockIds() },
+          }).select('_id');
+          filter.associateId = {
+            $in: [req.user._id, ...blockAssociates.map(a => a._id)],
+          };
+        }
+      }
     }
 
     const users = await User.find(filter)
@@ -473,6 +573,49 @@ exports.getUsers = async (req, res) => {
       success: true,
       count: users.length,
       data: users,
+    });
+  } catch (error) {
+    return res.status(500).json({ success: false, error: error.message });
+  }
+};
+
+// @desc    Block Coordinator — get all Associates in their assigned block(s)
+// @route   GET /api/v1/auth/block-associates
+exports.getBlockAssociates = async (req, res) => {
+  try {
+    const coordinator = req.user;
+
+    // Collect all block IDs this BC is responsible for
+    // blockId = the block they were assigned to at creation (raw ObjectId from middleware)
+    // assignedBlocks = additional blocks manually assigned via geo management
+    const blockIdSet = new Set();
+    if (coordinator.blockId) {
+      blockIdSet.add(String(coordinator.blockId));
+    }
+    (coordinator.assignedBlocks || []).forEach(b => {
+      blockIdSet.add(String(b));
+    });
+
+    if (blockIdSet.size === 0) {
+      return res.status(200).json({ success: true, count: 0, data: [] });
+    }
+
+    const blockIds = Array.from(blockIdSet);
+
+    // Find all ASSOCIATEs whose blockId matches any of the BC's blocks
+    const associates = await User.find({
+      role: 'ASSOCIATE',
+      blockId: { $in: blockIds },
+    })
+      .select('-password')
+      .populate('districtId', 'name')
+      .populate('blockId', 'name')
+      .sort({ createdAt: -1 });
+
+    return res.status(200).json({
+      success: true,
+      count: associates.length,
+      data: associates,
     });
   } catch (error) {
     return res.status(500).json({ success: false, error: error.message });

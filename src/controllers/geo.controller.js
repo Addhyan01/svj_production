@@ -72,9 +72,9 @@ exports.assignBlocksToAssociate = async (req, res) => {
     const { associateId } = req.params;
     const { blockIds } = req.body; // Array of Block ObjectIds
 
-    const associate = await User.findOne({ _id: associateId, role: 'ASSOCIATE' });
+    const associate = await User.findOne({ _id: associateId, role: { $in: ['ASSOCIATE', 'BLOCK_COORDINATOR'] } });
     if (!associate) {
-      return res.status(404).json({ success: false, message: 'Associate user not found.' });
+      return res.status(404).json({ success: false, message: 'Associate or Block Coordinator user not found.' });
     }
 
     // V1 Multi-block array assignment rule
@@ -98,7 +98,7 @@ exports.getAssociatesByBlock = async (req, res) => {
     const { blockId } = req.params;
 
     const associates = await User.find({
-      role: 'ASSOCIATE',
+      role: { $in: ['ASSOCIATE', 'BLOCK_COORDINATOR'] },
       assignedBlocks: blockId,
     })
       .select('-password')
@@ -130,7 +130,7 @@ exports.getAdminDistrictBlocks = async (req, res) => {
     const blocksWithCounts = await Promise.all(
       blocks.map(async (block) => {
         const associateCount = await User.countDocuments({
-          role: 'ASSOCIATE',
+          role: { $in: ['ASSOCIATE', 'BLOCK_COORDINATOR'] },
           assignedBlocks: block._id,
         });
         return { ...block.toObject(), associateCount };
@@ -167,7 +167,7 @@ exports.getMyBlocks = async (req, res) => {
 // @route   GET /api/v1/geo/assigned-associates
 exports.getAssignedAssociates = async (req, res) => {
   try {
-    const filter = { role: 'ASSOCIATE' };
+    const filter = { role: { $in: ['ASSOCIATE', 'BLOCK_COORDINATOR'] } };
 
     // District Admin can only see associates in their own district
     if (req.user && req.user.role === 'ADMIN') {

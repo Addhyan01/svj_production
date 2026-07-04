@@ -4,7 +4,7 @@ const meetingController = require('../controllers/meeting.controller');
 const { protect, restrictTo } = require('../middleware/auth.middleware');
 const { upload } = require('../middleware/upload.middleware');
 
-const STAFF_ROLES = ['ASSOCIATE', 'ADMIN', 'SUPER_ADMIN'];
+const STAFF_ROLES = ['ASSOCIATE', 'BLOCK_COORDINATOR', 'ADMIN', 'SUPER_ADMIN'];
 
 // Stats (before /:id to avoid route conflict)
 router.get('/stats', protect, restrictTo(...STAFF_ROLES), meetingController.getMeetingStats);
@@ -27,6 +27,14 @@ router.post(
 );
 
 router.get('/', protect, restrictTo(...STAFF_ROLES), meetingController.getMeetings);
+
+// BC: get meetings for a specific associate in their block (before /:id to avoid conflict)
+router.get(
+  '/bc/associate/:associateId',
+  protect,
+  restrictTo('BLOCK_COORDINATOR'),
+  meetingController.getAssociateMeetingsForBC
+);
 
 router.get('/:id', protect, restrictTo(...STAFF_ROLES), meetingController.getMeetingById);
 

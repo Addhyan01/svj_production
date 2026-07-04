@@ -11,7 +11,7 @@ const userSchema = new mongoose.Schema({
   phone: { type: String, required: true, unique: true },
   role: { 
     type: String, 
-    enum: ['SUPER_ADMIN', 'ADMIN', 'ASSOCIATE', 'MEMBER', 'DONOR'], 
+    enum: ['SUPER_ADMIN', 'ADMIN', 'ASSOCIATE', 'BLOCK_COORDINATOR', 'MEMBER', 'DONOR'], 
     required: true 
   },
   status: { 
@@ -29,6 +29,11 @@ const userSchema = new mongoose.Schema({
   
   assignedBlocks: [{ type: mongoose.Schema.Types.ObjectId, ref: 'Block' }],
   
+  // Additional personal details (primarily for MEMBER/DONOR)
+  fatherName: { type: String, trim: true, default: null },
+  address:    { type: String, trim: true, default: null },
+  pinCode:    { type: String, trim: true, default: null },
+
   // For MEMBER/DONOR: the ASSOCIATE they are assigned under
   associateId: { type: mongoose.Schema.Types.ObjectId, ref: 'User', default: null },
   

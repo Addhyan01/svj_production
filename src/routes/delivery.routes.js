@@ -6,11 +6,11 @@ const { protect, restrictTo } = require('../middleware/auth.middleware'); // JWT
 // All endpoints in this block require a valid active token session
 router.use(protect);
 
-// ASSOCIATE ONLY: Pendings dekhna, Dropdown status badalna, aur ticket grab karna
-router.get('/pending', restrictTo('ASSOCIATE'), deliveryController.getPendingDeliveries);
-router.get('/my-associate-deliveries', restrictTo('ASSOCIATE'), deliveryController.getAssociateDeliveries);
-router.put('/:id/status', restrictTo('ASSOCIATE'), deliveryController.updateDeliveryStatus);
-router.put('/:id/accept-emergency', restrictTo('ASSOCIATE'), deliveryController.acceptEmergencyRequest);
+// ASSOCIATE / BLOCK_COORDINATOR ONLY: Pendings dekhna, Dropdown status badalna, aur ticket grab karna
+router.get('/pending', restrictTo('ASSOCIATE', 'BLOCK_COORDINATOR'), deliveryController.getPendingDeliveries);
+router.get('/my-associate-deliveries', restrictTo('ASSOCIATE', 'BLOCK_COORDINATOR'), deliveryController.getAssociateDeliveries);
+router.put('/:id/status', restrictTo('ASSOCIATE', 'BLOCK_COORDINATOR'), deliveryController.updateDeliveryStatus);
+router.put('/:id/accept-emergency', restrictTo('ASSOCIATE', 'BLOCK_COORDINATOR'), deliveryController.acceptEmergencyRequest);
 
 // MEMBER ONLY: Emergency request create karna + own history
 router.get('/my',            restrictTo('MEMBER', 'DONOR'), deliveryController.getMyDeliveries);
@@ -22,9 +22,12 @@ router.get('/admin/escalations', restrictTo('ADMIN', 'SUPER_ADMIN'), deliveryCon
 router.get('/admin/all', restrictTo('ADMIN', 'SUPER_ADMIN'), deliveryController.getAllDeliveries);
 router.get('/admin/district-orders', restrictTo('ADMIN', 'SUPER_ADMIN'), deliveryController.getDistrictOrders);
 
-// ADMIN, SUPER_ADMIN, ASSOCIATE: view all orders for a specific member
-router.get('/admin/member/:memberId/orders', restrictTo('ADMIN', 'SUPER_ADMIN', 'ASSOCIATE'), deliveryController.getMemberOrders);
+// ADMIN, SUPER_ADMIN, ASSOCIATE, BLOCK_COORDINATOR: view all orders for a specific member
+router.get('/admin/member/:memberId/orders', restrictTo('ADMIN', 'SUPER_ADMIN', 'ASSOCIATE', 'BLOCK_COORDINATOR'), deliveryController.getMemberOrders);
 router.put('/admin/schedule-bulk', protect, restrictTo('SUPER_ADMIN', 'ADMIN'), deliveryController.scheduleBulkDeliveries);
+
+// BLOCK_COORDINATOR: view all deliveries for a specific associate in their block
+router.get('/bc/associate/:associateId/deliveries', restrictTo('BLOCK_COORDINATOR'), deliveryController.getAssociateDeliveriesForBC);
 
 // SUPER_ADMIN ONLY: raise emergency on behalf of member (toll-free helpline)
 router.post('/admin/emergency-for-member', restrictTo('SUPER_ADMIN'), deliveryController.raiseEmergencyForMember);

@@ -19,6 +19,7 @@ const meetingRoutes   = require('./routes/meeting.routes');
 const donationRoutes  = require('./routes/donation.routes');
 const enquiryRoutes   = require('./routes/enquiry.routes');
 const openingRoutes   = require('./routes/opening.routes');
+const samuhRoutes     = require('./routes/samuh.routes');
 
 const app = express();
 
@@ -49,6 +50,7 @@ app.use('/api/v1/meetings',   meetingRoutes);
 app.use('/api/v1/donations', donationRoutes);
 app.use('/api/v1/enquiries', enquiryRoutes);
 app.use('/api/v1/openings', openingRoutes);
+app.use('/api/v1/samuhs', samuhRoutes);
 
 // Simple Health Check
 app.get('/health', (req, res) => {

@@ -470,8 +470,8 @@ exports.getMemberOrders = async (req, res) => {
   try {
     const { memberId } = req.params;
 
-    // Security: Associate can only view orders for their own members
-    if (req.user.role === 'ASSOCIATE') {
+    // Security: Associate / Block Coordinator can only view orders for their own members
+    if (req.user.role === 'ASSOCIATE' || req.user.role === 'BLOCK_COORDINATOR') {
       const member = await User.findById(memberId);
       if (!member || member.associateId?.toString() !== req.user._id.toString()) {
         return res.status(403).json({ success: false, message: 'Unauthorized: This member is not under your account.' });
@@ -842,6 +842,60 @@ exports.getSuperAdminDeliveries = async (req, res) => {
       total,
       page: parseInt(page),
       pages: Math.ceil(total / parseInt(limit)),
+      data: deliveries,
+    });
+  } catch (error) {
+    return res.status(500).json({ success: false, error: error.message });
+  }
+};
+
+// @desc    Block Coordinator — get all deliveries for a specific associate in their block
+// @route   GET /api/v1/deliveries/bc/associate/:associateId/deliveries
+exports.getAssociateDeliveriesForBC = async (req, res) => {
+  try {
+    const { associateId } = req.params;
+    const bc = req.user;
+
+    // Collect BC's block IDs
+    const blockIdSet = new Set();
+    if (bc.blockId) blockIdSet.add(String(bc.blockId));
+    (bc.assignedBlocks || []).forEach(b => blockIdSet.add(String(b)));
+
+    if (blockIdSet.size === 0) {
+      return res.status(403).json({ success: false, message: 'No block assigned to your account.' });
+    }
+
+    // Verify the associate belongs to one of the BC's blocks
+    const assoc = await User.findOne({
+      _id: associateId,
+      role: 'ASSOCIATE',
+      blockId: { $in: Array.from(blockIdSet) },
+    });
+
+    if (!assoc) {
+      return res.status(403).json({ success: false, message: 'This associate is not in your block.' });
+    }
+
+    // Get all members under this associate
+    const assocMembers = await User.find({ associateId: assoc._id }).select('_id');
+    const memberIds = assocMembers.map(m => m._id);
+
+    // Get all deliveries where memberId is one of their members OR associateId matches
+    const deliveries = await Delivery.find({
+      $or: [
+        { memberId: { $in: memberIds } },
+        { associateId: assoc._id },
+      ],
+    })
+      .populate('memberId', 'name phone memberId membershipId')
+      .populate('associateId', 'name phone employeeId')
+      .populate('services.serviceId', 'name type')
+      .populate('blockId', 'name')
+      .sort({ createdAt: -1 });
+
+    return res.status(200).json({
+      success: true,
+      count: deliveries.length,
       data: deliveries,
     });
   } catch (error) {

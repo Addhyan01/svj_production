@@ -8,8 +8,8 @@ router.get('/districts', geoController.getAllDistricts);
 router.get('/districts/:districtId/blocks', geoController.getBlocksByDistrict);
 router.get('/blocks/:blockId/associates', geoController.getAssociatesByBlock);
 
-// Associate: fetch own assigned blocks (with district populated)
-router.get('/my-blocks', protect, restrictTo('ASSOCIATE'), geoController.getMyBlocks);
+// Associate / Block Coordinator: fetch own assigned blocks (with district populated)
+router.get('/my-blocks', protect, restrictTo('ASSOCIATE', 'BLOCK_COORDINATOR'), geoController.getMyBlocks);
 
 // Protected Management operations
 router.post('/districts', protect, restrictTo('SUPER_ADMIN'), geoController.createDistrict);
